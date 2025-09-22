@@ -12,6 +12,8 @@
   [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 </div>
 
+📚 **[Full Documentation](docs/)** | [API Reference](docs/api.md) | [Getting Started](docs/getting-started.md)
+
 ## Vision
 
 **beatz** is a modern, safe, and performant audio I/O library designed to replace legacy C audio libraries (PortAudio, ALSA, PulseAudio, JACK) with a pure Zig implementation. Part of a larger ecosystem:
