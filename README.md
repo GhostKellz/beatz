@@ -12,6 +12,14 @@
   [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 </div>
 
+## DISCLAIMER
+
+⚠️ **EXPERIMENTAL LIBRARY - FOR LAB/PERSONAL USE** ⚠️
+
+This is an experimental library under active development. It is
+intended for research, learning, and personal projects. The API is subject
+to change!
+
 📚 **[Full Documentation](docs/)** | [API Reference](docs/api.md) | [Getting Started](docs/getting-started.md)
 
 ## Vision
