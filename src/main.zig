@@ -25,6 +25,28 @@ pub fn main() !void {
     for (devices) |device| {
         std.debug.print("  - {s} (id: {s}, default: {})\n", .{ device.name, device.id, device.is_default });
     }
+
+    // Test stream creation
+    std.debug.print("\nTesting stream creation...\n", .{});
+
+    // Simple callback that just outputs silence for testing
+    const testCallback = struct {
+        fn callback(input: ?[]const f32, output: []f32, frame_count: usize) void {
+            _ = input;
+            // Output silence
+            for (0..frame_count * 2) |i| {
+                output[i] = 0.0;
+            }
+        }
+    }.callback;
+
+    var stream = ctx.createStream(testCallback) catch |err| {
+        std.debug.print("Failed to create stream: {}\n", .{err});
+        return;
+    };
+    defer stream.deinit();
+
+    std.debug.print("Stream created successfully!\n", .{});
 }
 
 test "simple test" {

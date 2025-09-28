@@ -1,8 +1,9 @@
-/zig-cache/
-/zig-out/
+.zig-cache/
+zig-out/
 *.o
 *.exe
 archive/
 /archive
 TODO.md
 CLAUDE.md
+ROADMAP.md

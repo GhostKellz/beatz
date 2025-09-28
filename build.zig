@@ -16,6 +16,34 @@ pub fn build(b: *std.Build) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+
+    // beatz modular build options
+    const beatz_mode = b.option(enum { performance, balanced, size }, "beatz_mode", "Performance mode: performance, balanced, or size") orelse .balanced;
+    const beatz_backends_str = b.option([]const u8, "beatz_backends", "Comma-separated backends: pipewire,alsa") orelse "pipewire,alsa";
+    const beatz_features_str = b.option([]const u8, "beatz_features", "Comma-separated features: core,mixer,hotplug,conversion") orelse "core,mixer,hotplug,conversion";
+    const beatz_buffer_sizes_str = b.option([]const u8, "beatz_buffer_sizes", "Comma-separated buffer sizes") orelse "64,128,256,512,1024,2048,4096";
+    const beatz_sample_rates_str = b.option([]const u8, "beatz_sample_rates", "Comma-separated sample rates") orelse "16000,22050,44100,48000,96000,192000";
+
+    // Parse build options - PipeWire is always enabled on Linux unless explicitly disabled
+    const has_pipewire = if (target.result.os.tag == .linux)
+        std.mem.indexOf(u8, beatz_backends_str, "no-pipewire") == null
+    else
+        std.mem.indexOf(u8, beatz_backends_str, "pipewire") != null;
+    const has_alsa = std.mem.indexOf(u8, beatz_backends_str, "alsa") != null;
+    const has_mixer = std.mem.indexOf(u8, beatz_features_str, "mixer") != null;
+    const has_hotplug = std.mem.indexOf(u8, beatz_features_str, "hotplug") != null;
+    const has_conversion = std.mem.indexOf(u8, beatz_features_str, "conversion") != null;
+
+    // Create build options for conditional compilation
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "enable_pipewire", has_pipewire);
+    build_options.addOption(bool, "enable_alsa", has_alsa);
+    build_options.addOption(bool, "enable_mixer", has_mixer);
+    build_options.addOption(bool, "enable_hotplug", has_hotplug);
+    build_options.addOption(bool, "enable_conversion", has_conversion);
+    build_options.addOption(@TypeOf(beatz_mode), "performance_mode", beatz_mode);
+    build_options.addOption([]const u8, "buffer_sizes", beatz_buffer_sizes_str);
+    build_options.addOption([]const u8, "sample_rates", beatz_sample_rates_str);
     // It's also possible to define more custom flags to toggle optional features
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
@@ -39,6 +67,9 @@ pub fn build(b: *std.Build) void {
         // Later on we'll use this module as the root module of a test executable
         // which requires us to specify a target.
         .target = target,
+        .imports = &.{
+            .{ .name = "build_options", .module = build_options.createModule() },
+        },
     });
 
     // Here we define an executable. An executable needs to have a root module
@@ -84,10 +115,28 @@ pub fn build(b: *std.Build) void {
     });
 
     if (target.result.os.tag == .linux) {
-        exe.linkSystemLibrary("pipewire-0.3");
-        exe.linkLibC();
-        exe.addIncludePath(.{ .cwd_relative = "/usr/include/pipewire-0.3" });
-        exe.addIncludePath(.{ .cwd_relative = "/usr/include/spa-0.2" });
+        // Conditional library linking based on enabled backends
+        if (has_pipewire) {
+            exe.linkSystemLibrary("pipewire-0.3");
+            exe.addIncludePath(.{ .cwd_relative = "/usr/include/pipewire-0.3" });
+            exe.addIncludePath(.{ .cwd_relative = "/usr/include/spa-0.2" });
+
+            mod.addSystemIncludePath(.{ .cwd_relative = "/usr/include/pipewire-0.3" });
+            mod.addSystemIncludePath(.{ .cwd_relative = "/usr/include/spa-0.2" });
+        }
+
+        if (has_alsa) {
+            exe.linkSystemLibrary("alsa");
+            exe.addIncludePath(.{ .cwd_relative = "/usr/include/alsa" });
+
+            mod.addSystemIncludePath(.{ .cwd_relative = "/usr/include/alsa" });
+        }
+
+        // Always link libc when any backend is enabled
+        if (has_pipewire or has_alsa) {
+            exe.linkLibC();
+            mod.link_libc = true;
+        }
     }
 
     // This declares intent for the executable to be installed into the
@@ -129,6 +178,22 @@ pub fn build(b: *std.Build) void {
         .root_module = mod,
     });
 
+    // Link system libraries for tests on Linux
+    if (target.result.os.tag == .linux) {
+        if (has_pipewire) {
+            mod_tests.linkSystemLibrary("pipewire-0.3");
+            mod_tests.addIncludePath(.{ .cwd_relative = "/usr/include/pipewire-0.3" });
+            mod_tests.addIncludePath(.{ .cwd_relative = "/usr/include/spa-0.2" });
+        }
+        if (has_alsa) {
+            mod_tests.linkSystemLibrary("alsa");
+            mod_tests.addIncludePath(.{ .cwd_relative = "/usr/include/alsa" });
+        }
+        if (has_pipewire or has_alsa) {
+            mod_tests.linkLibC();
+        }
+    }
+
     // A run step that will run the test executable.
     const run_mod_tests = b.addRunArtifact(mod_tests);
 
@@ -139,6 +204,16 @@ pub fn build(b: *std.Build) void {
         .root_module = exe.root_module,
     });
 
+    // Link system libraries for exe tests on Linux
+    if (target.result.os.tag == .linux) {
+        exe_tests.linkSystemLibrary("pipewire-0.3");
+        exe_tests.linkSystemLibrary("alsa");
+        exe_tests.linkLibC();
+        exe_tests.addIncludePath(.{ .cwd_relative = "/usr/include/pipewire-0.3" });
+        exe_tests.addIncludePath(.{ .cwd_relative = "/usr/include/spa-0.2" });
+        exe_tests.addIncludePath(.{ .cwd_relative = "/usr/include/alsa" });
+    }
+
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
@@ -148,6 +223,87 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+
+    // Add example executables
+    const wav_player_exe = b.addExecutable(.{
+        .name = "wav_player",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/wav_player.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "beatz", .module = mod },
+            },
+        }),
+    });
+
+    if (target.result.os.tag == .linux) {
+        wav_player_exe.linkSystemLibrary("pipewire-0.3");
+        wav_player_exe.linkSystemLibrary("alsa");
+        wav_player_exe.linkLibC();
+        wav_player_exe.addIncludePath(.{ .cwd_relative = "/usr/include/pipewire-0.3" });
+        wav_player_exe.addIncludePath(.{ .cwd_relative = "/usr/include/spa-0.2" });
+        wav_player_exe.addIncludePath(.{ .cwd_relative = "/usr/include/alsa" });
+    }
+
+    b.installArtifact(wav_player_exe);
+
+    const run_wav_player_step = b.step("wav-player", "Build and install WAV player example");
+    run_wav_player_step.dependOn(&wav_player_exe.step);
+
+    // Add audio recorder example
+    const audio_recorder_exe = b.addExecutable(.{
+        .name = "audio_recorder",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/audio_recorder.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "beatz", .module = mod },
+            },
+        }),
+    });
+
+    if (target.result.os.tag == .linux) {
+        audio_recorder_exe.linkSystemLibrary("pipewire-0.3");
+        audio_recorder_exe.linkSystemLibrary("alsa");
+        audio_recorder_exe.linkLibC();
+        audio_recorder_exe.addIncludePath(.{ .cwd_relative = "/usr/include/pipewire-0.3" });
+        audio_recorder_exe.addIncludePath(.{ .cwd_relative = "/usr/include/spa-0.2" });
+        audio_recorder_exe.addIncludePath(.{ .cwd_relative = "/usr/include/alsa" });
+    }
+
+    b.installArtifact(audio_recorder_exe);
+
+    const run_audio_recorder_step = b.step("audio-recorder", "Build and install audio recorder example");
+    run_audio_recorder_step.dependOn(&audio_recorder_exe.step);
+
+    // Add device monitor example
+    const device_monitor_exe = b.addExecutable(.{
+        .name = "device_monitor",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/device_monitor.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "beatz", .module = mod },
+            },
+        }),
+    });
+
+    if (target.result.os.tag == .linux) {
+        device_monitor_exe.linkSystemLibrary("pipewire-0.3");
+        device_monitor_exe.linkSystemLibrary("alsa");
+        device_monitor_exe.linkLibC();
+        device_monitor_exe.addIncludePath(.{ .cwd_relative = "/usr/include/pipewire-0.3" });
+        device_monitor_exe.addIncludePath(.{ .cwd_relative = "/usr/include/spa-0.2" });
+        device_monitor_exe.addIncludePath(.{ .cwd_relative = "/usr/include/alsa" });
+    }
+
+    b.installArtifact(device_monitor_exe);
+
+    const run_device_monitor_step = b.step("device-monitor", "Build and install device monitor example");
+    run_device_monitor_step.dependOn(&device_monitor_exe.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
